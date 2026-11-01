@@ -286,6 +286,7 @@ fi
 
 CONFIG_SPT_TENDER=
 CONFIG_HVT_TENDER=
+CONFIG_WPAR_TENDER=
 case ${HOST_CC_MACHINE} in
     x86_64-*linux*)
         CONFIG_HOST_ARCH=x86_64 CONFIG_HOST=Linux
@@ -314,6 +315,12 @@ case ${HOST_CC_MACHINE} in
     amd64-*openbsd*)
         CONFIG_HOST_ARCH=x86_64 CONFIG_HOST=OpenBSD
         CONFIG_HVT_TENDER=1
+        ;;
+    powerpc64-*aix*|ppc64-*aix*)
+        # AIX on POWER (64-bit).  The wpar tender is the only supported mode;
+        # hvt (KVM) is not available and seccomp (spt) does not exist on AIX.
+        CONFIG_HOST_ARCH=ppc64 CONFIG_HOST=AIX
+        CONFIG_WPAR_TENDER=1
         ;;
     *)
         die "Unsupported host toolchain: ${HOST_CC_MACHINE}"
@@ -394,6 +401,7 @@ CONFIG_SPT_TENDER=${CONFIG_SPT_TENDER}
 CONFIG_SPT_TENDER_NO_PIE=${CONFIG_SPT_TENDER_NO_PIE}
 CONFIG_SPT_TENDER_LIBSECCOMP_CFLAGS=${CONFIG_SPT_TENDER_LIBSECCOMP_CFLAGS}
 CONFIG_SPT_TENDER_LIBSECCOMP_LDLIBS=${CONFIG_SPT_TENDER_LIBSECCOMP_LDLIBS}
+CONFIG_WPAR_TENDER=${CONFIG_WPAR_TENDER}
 EOM
     sed -Ee 's/^([A-Z_]+)=(.*)$/\1="\2"/' Makeconf >Makeconf.sh
     cleanup
@@ -440,6 +448,13 @@ case ${TARGET_CC_MACHINE} in
         ;;
     powerpc64le-*|ppc64le-*)
         TARGET_ARCH=ppc64le
+        TARGET_LD_MAX_PAGE_SIZE=0x10000
+        CONFIG_SPT=1
+        ;;
+    powerpc64-*aix*|ppc64-*aix*)
+        # AIX on 64-bit POWER.  The unikernel binding targets solo5-spt (same
+        # ABI); only the wpar tender is available on this host.
+        TARGET_ARCH=ppc64
         TARGET_LD_MAX_PAGE_SIZE=0x10000
         CONFIG_SPT=1
         ;;
@@ -535,6 +550,15 @@ case ${CONFIG_HOST} in
             fi
         fi
         ;;
+    AIX)
+        # AIX uses the IBM XL C/C++ or open-source GCC toolchain.
+        # The AIX linker (ld) does not support --build-id; we omit it.
+        # -maix64 forces 64-bit mode; the bindings are built as 64-bit ELF
+        # (XCOFF is not used — we produce ELF via GCC -Wl,-belf).
+        TARGET_LD="${TARGET_LD:-ld}"
+        TARGET_OBJCOPY="${TARGET_OBJCOPY:-objcopy}"
+        TARGET_CC_LDFLAGS="-maix64 -Wl,-belf"
+        ;;
     *)
         die "Unsupported host system: ${CONFIG_HOST}"
         ;;
@@ -573,6 +597,7 @@ echo "."
 printf "%s: Enabled tenders:" "${prog_NAME}"
 [ -n "${CONFIG_HVT_TENDER}" ]    && printf " hvt"
 [ -n "${CONFIG_SPT_TENDER}" ]    && printf " spt"
+[ -n "${CONFIG_WPAR_TENDER}" ]   && printf " wpar"
 echo "."
 
 #
@@ -594,6 +619,7 @@ CONFIG_SPT_TENDER=${CONFIG_SPT_TENDER}
 CONFIG_SPT_TENDER_NO_PIE=${CONFIG_SPT_TENDER_NO_PIE}
 CONFIG_SPT_TENDER_LIBSECCOMP_CFLAGS=${CONFIG_SPT_TENDER_LIBSECCOMP_CFLAGS}
 CONFIG_SPT_TENDER_LIBSECCOMP_LDLIBS=${CONFIG_SPT_TENDER_LIBSECCOMP_LDLIBS}
+CONFIG_WPAR_TENDER=${CONFIG_WPAR_TENDER}
 CONFIG_VIRTIO=${CONFIG_VIRTIO}
 CONFIG_MUEN=${CONFIG_MUEN}
 CONFIG_XEN=${CONFIG_XEN}
