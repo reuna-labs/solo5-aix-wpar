@@ -33,7 +33,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
+#if defined(__aix__)
+#include <dirent.h>
+#endif
 
 #if defined(__linux__)
 
@@ -73,7 +77,73 @@ static int tap_fd_ifname(int fd, char *name)
 #include <sys/socket.h>
 #include <net/if.h>
 
-#else /* !__linux__ && !__FreeBSD__ && !__OpenBSD__ && !__DragonFly__ */
+#elif defined(__aix__)
+
+/*
+ * AIX TAP device specific.
+ *
+ * AIX does not have a universal /dev/net/tun device.  Each TAP interface
+ * ("ethertap" pseudo-driver) has its own character device node at /dev/tapN.
+ * The device is created by the administrator with:
+ *
+ *     mkdev -l tapN -c if -s tap -t ethertap
+ *
+ * and then opened as /dev/tapN directly.  There is no TUNSETIFF ioctl; the
+ * interface name is derived from the device node name.
+ *
+ * Interface liveness: AIX raises IFF_UP once open() is called (like FreeBSD),
+ * so we do not require IFF_RUNNING to be set before open().
+ */
+#include <sys/socket.h>
+#include <net/if.h>
+
+/* Load the name of the net interface into (*name) from the device node. */
+static int tap_fd_ifname(int fd, char *name)
+{
+    struct stat st;
+    const char *dn;
+
+    if (fstat(fd, &st) == -1)
+        return -1;
+    if (!S_ISCHR(st.st_mode)) {
+        errno = ENOTTY;
+        return -1;
+    }
+
+    /*
+     * On AIX, devname(3) is not available; instead, the node name is the
+     * interface name.  We reconstruct it from the device number via the
+     * /dev directory.  For simplicity, we resolve the symlink/name by
+     * scanning /dev for a character device with matching st_rdev.
+     *
+     * In the @<num> fd-passing path this is called only to validate that the
+     * fd really is a TAP interface and to extract the name for tap_configure.
+     * We tolerate errors here and fall back to the ifaddrs scan.
+     */
+    DIR *dir = opendir("/dev");
+    if (dir == NULL)
+        return -1;
+    struct dirent *de;
+    while ((de = readdir(dir)) != NULL) {
+        if (strncmp(de->d_name, "tap", 3) != 0)
+            continue;
+        char devpath[PATH_MAX];
+        snprintf(devpath, sizeof(devpath), "/dev/%s", de->d_name);
+        struct stat ds;
+        if (stat(devpath, &ds) == 0 &&
+            S_ISCHR(ds.st_mode) &&
+            ds.st_rdev == st.st_rdev) {
+            strlcpy(name, de->d_name, IFNAMSIZ);
+            closedir(dir);
+            return 0;
+        }
+    }
+    closedir(dir);
+    errno = ENODEV;
+    return -1;
+}
+
+#else /* !__linux__ && !__FreeBSD__ && !__OpenBSD__ && !__DragonFly__ && !__aix__ */
 
 #error Unsupported target
 
@@ -301,6 +371,25 @@ int tap_attach(const char *ifname, int *mtu)
     fd = open(devname, O_RDWR | O_NONBLOCK);
     if (fd == -1)
         return -1;
+
+#elif defined(__aix__)
+
+    /*
+     * AIX: open /dev/tapN directly.  The ethertap driver raises IFF_UP when
+     * the device is opened, so we do not require it to be up beforehand (same
+     * as FreeBSD).  The interface must already exist (mkdev was run by the
+     * administrator / container runtime).
+     */
+    if (!up)
+        ;
+
+    char devname[strlen(ifname) + 6];
+
+    snprintf(devname, sizeof devname, "/dev/%s", ifname);
+    fd = open(devname, O_RDWR | O_NONBLOCK);
+    if (fd == -1)
+        return -1;
+
 #endif
 
     if (tap_configure(ifname, mtu) == -1) {

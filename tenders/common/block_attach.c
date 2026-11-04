@@ -35,6 +35,17 @@
 /*
  * Attach to the block device specified by (path), returning its capacity in
  * bytes in (*capacity).
+ *
+ * AIX notes
+ * ---------
+ * This implementation works on AIX for regular files and for raw/character
+ * block devices (/dev/rhdiskN, /dev/fslvNN) opened O_RDWR, since lseek(2)
+ * with SEEK_END returns the device capacity on AIX character-mode devices.
+ *
+ * For LVM logical volumes and raw disk slices where lseek behaviour is
+ * unreliable, a future implementation may use the AIX-specific IOCINFO ioctl
+ * (see <sys/ioctl.h> and the devinfo structure) to obtain the block count and
+ * block size directly.  That path is tracked in WPAR.md §Storage.
  */
 int block_attach(const char *path, off_t *capacity_)
 {

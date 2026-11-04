@@ -140,9 +140,26 @@ all_TARGETS += spt/solo5-spt
 
 endif # CONFIG_SPT_TENDER
 
+ifdef CONFIG_WPAR_TENDER
+
+# AIX WPAR tender: no seccomp, poll(2) replaces epoll, SIGALRM replaces timerfd.
+# No extra CFLAGS or LDLIBS needed — confinement is provided by the kmod bitmap.
+
+wpar_SRCS := wpar/wpar_main.c wpar/wpar_core.c wpar/wpar_launch_ppc64.S \
+    wpar/wpar_module_net.c wpar/wpar_module_block.c
+
+wpar_OBJS := $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(wpar_SRCS)))
+
+wpar/solo5-wpar: $(wpar_OBJS) $(common_LIB)
+	$(HOSTLINK)
+
+all_TARGETS += wpar/solo5-wpar
+
+endif # CONFIG_WPAR_TENDER
+
 all: $(all_TARGETS)
 
-all_OBJS := $(common_OBJS) $(hvt_OBJS) $(hvt_debug_OBJS) $(spt_OBJS)
+all_OBJS := $(common_OBJS) $(hvt_OBJS) $(hvt_debug_OBJS) $(spt_OBJS) $(wpar_OBJS)
 all_DEPS := $(patsubst %.o,%.d,$(all_OBJS))
 
 .PHONY: clean
